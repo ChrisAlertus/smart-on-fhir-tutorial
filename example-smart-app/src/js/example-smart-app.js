@@ -32,15 +32,12 @@
           var lname = '';
 
           if (typeof patient.name[0] !== 'undefined') {
-            console.log(patient.name[0]);
             lname = Array.isArray(patient.name[0].family) 
               ? patient.name[0].family.join(" ") 
               : (patient.name[0].family || "");
             fname = Array.isArray(patient.name[0].given) 
               ? patient.name[0].given.join(" ") 
               : (patient.name[0].given || "");
-            console.log(lname);
-            console.log(fname);
           }
 
           var height = byCodes('8302-2');
@@ -54,10 +51,6 @@
           p.gender = gender;
           p.fname = fname;
           p.lname = lname;
-          console.log(p.fname);
-          console.log(p.lname);
-          console.log(fname);
-          console.log(lname);
           
           p.height = getQuantityValueAndUnit(height[0]);
 
