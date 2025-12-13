@@ -39,8 +39,6 @@
             const fname = Array.isArray(patient.name.given) 
               ? patient.name.given.join(" ") 
               : (patient.name.given || "");
-            #fname = patient.name[0].given.join(' ');
-            #lname = patient.name[0].family.join(' ');
           }
 
           var height = byCodes('8302-2');
