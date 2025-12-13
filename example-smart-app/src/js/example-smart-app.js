@@ -33,10 +33,10 @@
 
           if (typeof patient.name[0] !== 'undefined') {
             console.log(patient.name[0]);
-            const lname = Array.isArray(patient.name[0].family) 
+            lname = Array.isArray(patient.name[0].family) 
               ? patient.name[0].family.join(" ") 
               : (patient.name[0].family || "");
-            const fname = Array.isArray(patient.name[0].given) 
+            fname = Array.isArray(patient.name[0].given) 
               ? patient.name[0].given.join(" ") 
               : (patient.name[0].given || "");
             console.log(lname);
