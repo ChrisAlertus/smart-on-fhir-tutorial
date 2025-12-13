@@ -54,6 +54,11 @@
           p.gender = gender;
           p.fname = fname;
           p.lname = lname;
+          console.log(p.fname);
+          console.log(p.lname);
+          console.log(fname);
+          console.log(lname);
+          
           p.height = getQuantityValueAndUnit(height[0]);
 
           if (typeof systolicbp != 'undefined')  {
