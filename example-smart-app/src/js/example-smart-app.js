@@ -33,12 +33,12 @@
 
           if (typeof patient.name[0] !== 'undefined') {
             console.log(patient.name[0])
-            const lname = Array.isArray(name.family) 
-              ? name.family.join(" ") 
-              : (name.family || "");
-            const fname = Array.isArray(name.given) 
-              ? name.given.join(" ") 
-              : (name.given || "");
+            const lname = Array.isArray(patient.name.family) 
+              ? patient.name.family.join(" ") 
+              : (patient.name.family || "");
+            const fname = Array.isArray(patient.name.given) 
+              ? patient.name.given.join(" ") 
+              : (patient.name.given || "");
             #fname = patient.name[0].given.join(' ');
             #lname = patient.name[0].family.join(' ');
           }
