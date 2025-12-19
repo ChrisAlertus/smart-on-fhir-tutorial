@@ -16,12 +16,11 @@ bp = Blueprint("fhir", __name__)
 # Get FHIR server base URL from environment
 FHIR_BASE_URL = os.getenv("FHIR_BASE_URL", "")
 
-def get_fhir_resource(
-    resource_type: str,
-    resource_id: str = None,
-    access_token: str = None,
-    query_params: dict = None
-) -> dict:
+
+def get_fhir_resource(resource_type: str,
+                      resource_id: str = None,
+                      access_token: str = None,
+                      query_params: dict = None) -> dict:
     """
     Make a request to the FHIR server
 
@@ -54,20 +53,22 @@ def get_fhir_resource(
 
     # Make request
     try:
-        response = requests.get(
-            url,
-            headers=headers,
-            params=query_params,
-            timeout=30.0,
-            verify=True
-        )
+        response = requests.get(url,
+                                headers=headers,
+                                params=query_params,
+                                timeout=30.0,
+                                verify=True)
         response.raise_for_status()
+        print("FHIR response:", url, response.json())
         return response.json()
     except requests.exceptions.HTTPError as e:
         from werkzeug.exceptions import HTTPException
-        raise HTTPException(description=f"FHIR server error: {e.response.text}", response=e.response)
+        raise HTTPException(
+            description=f"FHIR server error: {e.response.text}",
+            response=e.response)
     except requests.exceptions.RequestException as e:
         raise ServiceUnavailable(f"Failed to connect to FHIR server: {str(e)}")
+
 
 @bp.route("/Patient/<patient_id>", methods=["GET"])
 def get_patient(patient_id: str):
@@ -101,6 +102,7 @@ def get_patient(patient_id: str):
 
     # Get patient resource
     return jsonify(get_fhir_resource("Patient", patient_id, token))
+
 
 @bp.route("/Observation", methods=["GET"])
 def get_observations():
@@ -154,6 +156,7 @@ def get_observations():
 
     # Get observations
     return jsonify(get_fhir_resource("Observation", None, token, query_params))
+
 
 @bp.route("/Patient", methods=["GET"])
 def search_patients():

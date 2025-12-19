@@ -252,7 +252,9 @@
     var headers = {
       'Authorization': 'Bearer ' + token,
       'Accept': 'application/json',
-      'Content-Type': 'application/json'
+      'Content-Type': 'application/json',
+      // Bypass ngrok warning page for free tier
+      'ngrok-skip-browser-warning': 'true'
     };
 
     console.log('Request headers:', headers);
@@ -265,6 +267,8 @@
       beforeSend: function (xhr) {
         // Explicitly set Authorization header in beforeSend to ensure it's sent
         xhr.setRequestHeader('Authorization', 'Bearer ' + token);
+        // Also set ngrok bypass header
+        xhr.setRequestHeader('ngrok-skip-browser-warning', 'true');
         console.log('Setting Authorization header in beforeSend');
       },
       // Explicitly disable credentials to avoid CORS issues
@@ -273,14 +277,58 @@
         withCredentials: false
       },
       crossDomain: true
-    }).done(function (data) {
-      console.log('API call succeeded');
-      ret.resolve(data);
+    }).done(function (data, textStatus, xhr) {
+      // Check if response is actually HTML (ngrok warning page)
+      var contentType = xhr.getResponseHeader('Content-Type') || '';
+      var responseText = typeof data === 'string' ? data : (xhr.responseText || '');
+
+      if (contentType.includes('text/html') ||
+        (typeof data === 'string' && data.trim().startsWith('<!DOCTYPE')) ||
+        responseText.trim().startsWith('<!DOCTYPE')) {
+        console.error('Received HTML instead of JSON - ngrok warning page detected');
+        console.error('Response preview:', responseText.substring(0, 200));
+        ret.reject({
+          status: xhr.status || 200,
+          responseText: 'ngrok warning page intercepted request',
+          error: 'HTML response received instead of JSON'
+        });
+        return;
+      }
+
+      // Ensure we have JSON data
+      var jsonData = data;
+      if (typeof data === 'string') {
+        try {
+          jsonData = JSON.parse(data);
+        } catch (e) {
+          console.error('Failed to parse JSON response:', e);
+          ret.reject({
+            status: xhr.status || 200,
+            responseText: data,
+            error: 'Invalid JSON response'
+          });
+          return;
+        }
+      }
+
+      console.log('API call succeeded with JSON response');
+      ret.resolve(jsonData);
     }).fail(function (xhr, status, error) {
       console.error('Backend API call failed:', status, error);
       console.error('Response status:', xhr.status);
       console.error('Response text:', xhr.responseText);
-      ret.reject(xhr, status, error);
+
+      // Check if it's an ngrok warning page
+      if (xhr.responseText && xhr.responseText.trim().startsWith('<!DOCTYPE')) {
+        console.error('ngrok warning page detected in error response');
+        ret.reject({
+          status: xhr.status || 200,
+          responseText: 'ngrok warning page intercepted request',
+          error: 'ngrok warning page'
+        });
+      } else {
+        ret.reject(xhr, status, error);
+      }
     });
 
     return ret.promise();
@@ -371,8 +419,28 @@
           console.log('Patient response:', patientResponse);
           console.log('Observations response:', obvResponse);
 
+          // Validate that we received JSON, not HTML (ngrok warning page)
+          if (typeof patientResponse === 'string' && patientResponse.trim().startsWith('<!DOCTYPE')) {
+            console.error('Patient response is HTML (ngrok warning page), not JSON');
+            onError();
+            return;
+          }
+
+          if (typeof obvResponse === 'string' && obvResponse.trim().startsWith('<!DOCTYPE')) {
+            console.error('Observations response is HTML (ngrok warning page), not JSON');
+            onError();
+            return;
+          }
+
           // Extract patient data - backend returns the Patient resource directly
           var patient = patientResponse;
+
+          // Validate patient object structure
+          if (!patient || typeof patient !== 'object') {
+            console.error('Invalid patient response format:', patient);
+            onError();
+            return;
+          }
 
           // Extract observations - backend returns Bundle with entry array
           var observations = [];
