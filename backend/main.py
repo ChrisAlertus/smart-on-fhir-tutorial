@@ -33,24 +33,25 @@ for origin in allowed_origins:
                    or origin.startswith("http://")):
         cleaned_origins.append(origin)
 
-# If no valid origins, allow all (for development only - restrict in production)
+# IMPORTANT: Cannot use "*" with supports_credentials=True
+# Must specify exact origins when using credentials
 if not cleaned_origins:
     print(
-        "WARNING: No CORS origins configured. Allowing all origins (development only)."
+        "WARNING: No CORS origins configured. Using default GitHub Pages origin."
     )
-    CORS(app,
-         resources={r"/api/*": {
-             "origins": "*"
-         }},
-         supports_credentials=True)
-else:
-    print(f"CORS allowed origins: {cleaned_origins}")
-    CORS(app,
-         origins=cleaned_origins,
-         supports_credentials=True,
-         methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-         allow_headers=["Authorization", "Content-Type"],
-         expose_headers=["Content-Type"])
+    # Default to GitHub Pages if nothing configured
+    cleaned_origins = ["https://chrisalertus.github.io"]
+
+print(f"CORS allowed origins: {cleaned_origins}")
+# Note: supports_credentials=False because we use Authorization headers, not cookies
+CORS(
+    app,
+    origins=cleaned_origins,
+    supports_credentials=
+    False,  # Set to False since we use Authorization headers
+    methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
+    expose_headers=["Content-Type"])
 
 # Import blueprints
 try:

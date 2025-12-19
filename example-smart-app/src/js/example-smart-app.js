@@ -214,8 +214,13 @@
   function callBackendAPI(endpoint, token, queryParams) {
     var ret = $.Deferred();
     // Use window.BACKEND_API_URL if set, otherwise fall back to BACKEND_API_URL variable
-    var backendUrl = window.BACKEND_API_URL || BACKEND_API_URL;
+    var backendUrl = (typeof window !== 'undefined' && window.BACKEND_API_URL)
+      ? window.BACKEND_API_URL
+      : BACKEND_API_URL;
     var url = backendUrl + endpoint;
+
+    console.log('Making API call to:', url);
+    console.log('Backend URL source:', (typeof window !== 'undefined' && window.BACKEND_API_URL) ? 'window.BACKEND_API_URL' : 'BACKEND_API_URL variable');
 
     var headers = {
       'Authorization': 'Bearer ' + token,
@@ -228,8 +233,9 @@
       method: 'GET',
       headers: headers,
       data: queryParams,
+      // Note: withCredentials requires exact CORS origin, not "*"
       xhrFields: {
-        withCredentials: true
+        withCredentials: false  // Set to false since we're using Authorization header
       }
     }).done(function (data) {
       ret.resolve(data);
@@ -250,208 +256,259 @@
     }
 
     function onReady(smart) {
-      if (smart.hasOwnProperty('patient') && smart.tokenResponse) {
-        // Store token in cookie
-        setTokenCookie(smart.tokenResponse);
+      // Validate smart object and token response
+      if (!smart) {
+        console.error('Smart object is null or undefined');
+        onError();
+        return;
+      }
 
-        // Get patient ID
-        var patientId = smart.patient.id || getPatientIdCookie();
+      if (!smart.hasOwnProperty('patient')) {
+        console.error('Smart object does not have patient property');
+        onError();
+        return;
+      }
 
-        if (!patientId) {
+      if (!smart.tokenResponse) {
+        console.error('Smart object does not have tokenResponse');
+        onError();
+        return;
+      }
+
+      // Validate access token exists and is not empty
+      if (!smart.tokenResponse.access_token || smart.tokenResponse.access_token.trim() === '') {
+        console.error('Token response does not have a valid access_token');
+        onError();
+        return;
+      }
+
+      // Store token in cookie
+      setTokenCookie(smart.tokenResponse);
+
+      // Get patient ID
+      var patientId = smart.patient.id || getPatientIdCookie();
+
+      if (!patientId) {
+        console.error('No patient ID available');
+        onError();
+        return;
+      }
+
+      // Check if token needs refresh
+      var tokenPromise = $.Deferred().resolve(smart.tokenResponse);
+      if (isTokenExpired()) {
+        console.log('Token expired, attempting refresh...');
+        tokenPromise = refreshToken(smart);
+      }
+
+      tokenPromise.done(function (tokenResponse) {
+        var accessToken = tokenResponse.access_token || getTokenCookie();
+
+        if (!accessToken) {
           onError();
           return;
         }
 
-        // Check if token needs refresh
-        var tokenPromise = $.Deferred().resolve(smart.tokenResponse);
-        if (isTokenExpired()) {
-          console.log('Token expired, attempting refresh...');
-          tokenPromise = refreshToken(smart);
-        }
+        // Get patient data from backend
+        var ptPromise = callBackendAPI('/api/fhir/Patient/' + patientId, accessToken);
 
-        tokenPromise.done(function (tokenResponse) {
-          var accessToken = tokenResponse.access_token || getTokenCookie();
+        // Get observations from backend
+        // Note: FHIR code parameter format may vary by server
+        // Using multiple code parameters or comma-separated values
+        var obvPromise = callBackendAPI('/api/fhir/Observation', accessToken, {
+          patient: patientId,
+          code: 'http://loinc.org|8302-2,http://loinc.org|8462-4,http://loinc.org|8480-6,http://loinc.org|2085-9,http://loinc.org|2089-1,http://loinc.org|55284-4',
+          _count: 100
+        });
 
-          if (!accessToken) {
-            onError();
-            return;
-          }
+        $.when(ptPromise, obvPromise).fail(onError);
 
-          // Get patient data from backend
-          var ptPromise = callBackendAPI('/api/fhir/Patient/' + patientId, accessToken);
+        $.when(ptPromise, obvPromise).done(function (patientResponse, obvResponse) {
+          // Extract patient data
+          var patient = patientResponse;
+          var observations = obvResponse.entry || [];
+          var obv = observations.map(function (entry) { return entry.resource; });
 
-          // Get observations from backend
-          // Note: FHIR code parameter format may vary by server
-          // Using multiple code parameters or comma-separated values
-          var obvPromise = callBackendAPI('/api/fhir/Observation', accessToken, {
-            patient: patientId,
-            code: 'http://loinc.org|8302-2,http://loinc.org|8462-4,http://loinc.org|8480-6,http://loinc.org|2085-9,http://loinc.org|2089-1,http://loinc.org|55284-4',
-            _count: 100
-          });
-
-          $.when(ptPromise, obvPromise).fail(onError);
-
-          $.when(ptPromise, obvPromise).done(function (patientResponse, obvResponse) {
-            // Extract patient data
-            var patient = patientResponse;
-            var observations = obvResponse.entry || [];
-            var obv = observations.map(function (entry) { return entry.resource; });
-
-            // Use smart.byCodes if available, otherwise create a simple lookup
-            var byCodes = smart.byCodes || function (observations, codeField) {
-              return function (code) {
-                return observations.filter(function (obs) {
-                  if (!obs.code || !obs.code.coding) return false;
-                  return obs.code.coding.some(function (coding) {
-                    return coding.code === code ||
-                      (coding.system && coding.code &&
-                        (coding.system + '|' + coding.code).endsWith('|' + code));
-                  });
+          // Use smart.byCodes if available, otherwise create a simple lookup
+          var byCodes = smart.byCodes || function (observations, codeField) {
+            return function (code) {
+              return observations.filter(function (obs) {
+                if (!obs.code || !obs.code.coding) return false;
+                return obs.code.coding.some(function (coding) {
+                  return coding.code === code ||
+                    (coding.system && coding.code &&
+                      (coding.system + '|' + coding.code).endsWith('|' + code));
                 });
-              };
+              });
             };
+          };
 
-            var byCodesFunc = byCodes(obv, 'code');
-            var gender = patient.gender;
+          var byCodesFunc = byCodes(obv, 'code');
+          var gender = patient.gender;
 
-            var fname = '';
-            var lname = '';
+          var fname = '';
+          var lname = '';
 
-            if (typeof patient.name !== 'undefined' && patient.name.length > 0) {
-              lname = Array.isArray(patient.name[0].family)
-                ? patient.name[0].family.join(" ")
-                : (patient.name[0].family || "");
-              fname = Array.isArray(patient.name[0].given)
-                ? patient.name[0].given.join(" ")
-                : (patient.name[0].given || "");
-            }
-
-            var height = byCodesFunc('8302-2');
-            var systolicbp = getBloodPressureValue(byCodesFunc('55284-4'), '8480-6');
-            var diastolicbp = getBloodPressureValue(byCodesFunc('55284-4'), '8462-4');
-            var hdl = byCodesFunc('2085-9');
-            var ldl = byCodesFunc('2089-1');
-
-            var p = defaultPatient();
-            p.birthdate = patient.birthDate;
-            p.gender = gender;
-            p.fname = fname;
-            p.lname = lname;
-
-            p.height = getQuantityValueAndUnit(height[0]);
-
-            if (typeof systolicbp != 'undefined') {
-              p.systolicbp = systolicbp;
-            }
-
-            if (typeof diastolicbp != 'undefined') {
-              p.diastolicbp = diastolicbp;
-            }
-
-            p.hdl = getQuantityValueAndUnit(hdl[0]);
-            p.ldl = getQuantityValueAndUnit(ldl[0]);
-
-            ret.resolve(p);
-          });
-        }).fail(function (error) {
-          console.error('Token refresh failed:', error);
-          onError();
-        });
-      } else {
-        onError();
-      }
-    }
-
-    // Check if we have a stored token
-    var storedToken = getTokenCookie();
-    if (storedToken && !isTokenExpired()) {
-      // Use stored token, but we still need the smart object for patient context
-      // So we'll still call FHIR.oauth2.ready but it should use the stored token
-      FHIR.oauth2.ready(onReady, onError);
-    } else {
-      // No stored token or expired, need to go through OAuth flow
-      FHIR.oauth2.ready(onReady, onError);
-    }
-
-    return ret.promise();
-
-  };
-
-  // Expose token management functions
-  window.revokeToken = function () {
-    // Get smart object from sessionStorage if available
-    var tokenResponse = getCookie('fhir_token_response');
-    var smart = null;
-    if (tokenResponse) {
-      try {
-        var tokenData = JSON.parse(tokenResponse);
-        if (tokenData.state) {
-          var state = JSON.parse(sessionStorage[tokenData.state] || '{}');
-          if (state) {
-            smart = { tokenResponse: tokenData };
+          if (typeof patient.name !== 'undefined' && patient.name.length > 0) {
+            lname = Array.isArray(patient.name[0].family)
+              ? patient.name[0].family.join(" ")
+              : (patient.name[0].family || "");
+            fname = Array.isArray(patient.name[0].given)
+              ? patient.name[0].given.join(" ")
+              : (patient.name[0].given || "");
           }
-        }
-      } catch (e) {
-        console.error('Error parsing token response:', e);
-      }
-    }
-    return revokeToken(smart);
-  };
 
-  function defaultPatient() {
-    return {
-      fname: { value: '' },
-      lname: { value: '' },
-      gender: { value: '' },
-      birthdate: { value: '' },
-      height: { value: '' },
-      systolicbp: { value: '' },
-      diastolicbp: { value: '' },
-      ldl: { value: '' },
-      hdl: { value: '' },
-    };
-  }
+          var height = byCodesFunc('8302-2');
+          var systolicbp = getBloodPressureValue(byCodesFunc('55284-4'), '8480-6');
+          var diastolicbp = getBloodPressureValue(byCodesFunc('55284-4'), '8462-4');
+          var hdl = byCodesFunc('2085-9');
+          var ldl = byCodesFunc('2089-1');
 
-  function getBloodPressureValue(BPObservations, typeOfPressure) {
-    var formattedBPObservations = [];
-    BPObservations.forEach(function (observation) {
-      var BP = observation.component.find(function (component) {
-        return component.code.coding.find(function (coding) {
-          return coding.code == typeOfPressure;
+          var p = defaultPatient();
+          p.birthdate = patient.birthDate;
+          p.gender = gender;
+          p.fname = fname;
+          p.lname = lname;
+
+          p.height = getQuantityValueAndUnit(height[0]);
+
+          if (typeof systolicbp != 'undefined') {
+            p.systolicbp = systolicbp;
+          }
+
+          if (typeof diastolicbp != 'undefined') {
+            p.diastolicbp = diastolicbp;
+          }
+
+          p.hdl = getQuantityValueAndUnit(hdl[0]);
+          p.ldl = getQuantityValueAndUnit(ldl[0]);
+
+          ret.resolve(p);
         });
+      }).fail(function (error) {
+        console.error('Token refresh failed:', error);
+        onError();
       });
-      if (BP) {
-        observation.valueQuantity = BP.valueQuantity;
-        formattedBPObservations.push(observation);
-      }
-    });
-
-    return getQuantityValueAndUnit(formattedBPObservations[0]);
-  }
-
-  function getQuantityValueAndUnit(ob) {
-    if (typeof ob != 'undefined' &&
-      typeof ob.valueQuantity != 'undefined' &&
-      typeof ob.valueQuantity.value != 'undefined' &&
-      typeof ob.valueQuantity.unit != 'undefined') {
-      return ob.valueQuantity.value + ' ' + ob.valueQuantity.unit;
     } else {
-      return undefined;
+      onError();
     }
   }
 
-  window.drawVisualization = function (p) {
-    $('#holder').show();
-    $('#loading').hide();
-    $('#fname').html(p.fname);
-    $('#lname').html(p.lname);
-    $('#gender').html(p.gender);
-    $('#birthdate').html(p.birthdate);
-    $('#height').html(p.height);
-    $('#systolicbp').html(p.systolicbp);
-    $('#diastolicbp').html(p.diastolicbp);
-    $('#ldl').html(p.ldl);
-    $('#hdl').html(p.hdl);
+  // Check if we have a stored token
+  var storedToken = getTokenCookie();
+  if (storedToken && !isTokenExpired()) {
+    // Use stored token, but we still need the smart object for patient context
+    // So we'll still call FHIR.oauth2.ready but it should use the stored token
+    FHIR.oauth2.ready(onReady, onError);
+  } else {
+    console.error('No OAuth callback detected and no token in storage. Redirect to launch page.');
+    onError();
+  }
+} catch (error) {
+  console.error('Error calling FHIR.oauth2.ready:', error);
+  // If it's the specific JWT decode error, try to continue anyway
+  if (error.message && error.message.includes('exp')) {
+    console.warn('JWT decode error detected, but attempting to continue...');
+    // Try to get token from sessionStorage directly
+    try {
+      if (sessionStorage.tokenResponse) {
+        var storedToken = JSON.parse(sessionStorage.tokenResponse);
+        if (storedToken && storedToken.access_token) {
+          // Create a minimal smart object
+          var minimalSmart = {
+            tokenResponse: storedToken,
+            patient: { id: getPatientIdCookie() }
+          };
+          onReady(minimalSmart);
+          return ret.promise();
+        }
+      }
+    } catch (e) {
+      console.error('Failed to recover from error:', e);
+    }
+  }
+  onError();
+}
+
+return ret.promise();
+
   };
 
-})(window);
+// Expose token management functions
+window.revokeToken = function () {
+  // Get smart object from sessionStorage if available
+  var tokenResponse = getCookie('fhir_token_response');
+  var smart = null;
+  if (tokenResponse) {
+    try {
+      var tokenData = JSON.parse(tokenResponse);
+      if (tokenData.state) {
+        var state = JSON.parse(sessionStorage[tokenData.state] || '{}');
+        if (state) {
+          smart = { tokenResponse: tokenData };
+        }
+      }
+    } catch (e) {
+      console.error('Error parsing token response:', e);
+    }
+  }
+  return revokeToken(smart);
+};
+
+function defaultPatient() {
+  return {
+    fname: { value: '' },
+    lname: { value: '' },
+    gender: { value: '' },
+    birthdate: { value: '' },
+    height: { value: '' },
+    systolicbp: { value: '' },
+    diastolicbp: { value: '' },
+    ldl: { value: '' },
+    hdl: { value: '' },
+  };
+}
+
+function getBloodPressureValue(BPObservations, typeOfPressure) {
+  var formattedBPObservations = [];
+  BPObservations.forEach(function (observation) {
+    var BP = observation.component.find(function (component) {
+      return component.code.coding.find(function (coding) {
+        return coding.code == typeOfPressure;
+      });
+    });
+    if (BP) {
+      observation.valueQuantity = BP.valueQuantity;
+      formattedBPObservations.push(observation);
+    }
+  });
+
+  return getQuantityValueAndUnit(formattedBPObservations[0]);
+}
+
+function getQuantityValueAndUnit(ob) {
+  if (typeof ob != 'undefined' &&
+    typeof ob.valueQuantity != 'undefined' &&
+    typeof ob.valueQuantity.value != 'undefined' &&
+    typeof ob.valueQuantity.unit != 'undefined') {
+    return ob.valueQuantity.value + ' ' + ob.valueQuantity.unit;
+  } else {
+    return undefined;
+  }
+}
+
+window.drawVisualization = function (p) {
+  $('#holder').show();
+  $('#loading').hide();
+  $('#fname').html(p.fname);
+  $('#lname').html(p.lname);
+  $('#gender').html(p.gender);
+  $('#birthdate').html(p.birthdate);
+  $('#height').html(p.height);
+  $('#systolicbp').html(p.systolicbp);
+  $('#diastolicbp').html(p.diastolicbp);
+  $('#ldl').html(p.ldl);
+  $('#hdl').html(p.hdl);
+};
+
+}) (window);
