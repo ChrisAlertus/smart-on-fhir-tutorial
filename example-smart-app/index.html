@@ -87,7 +87,9 @@
   <script src="https://ajax.googleapis.com/ajax/libs/jquery/1.12.4/jquery.min.js"></script>
   <script>
     // Configure backend API URL (should be HTTPS)
+    // Replace with your ngrok URL when testing
     window.BACKEND_API_URL = 'https://wattless-rotundly-celena.ngrok-free.dev' //window.BACKEND_API_URL || 'https://localhost:8443';
+    console.log('Backend URL configured:', window.BACKEND_API_URL);
 
     extractData().then(
       //Display Patient Demographics and Observations if extractData was success
