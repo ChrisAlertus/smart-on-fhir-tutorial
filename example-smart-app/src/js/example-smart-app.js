@@ -231,6 +231,14 @@
   // Make API call to Flask backend
   function callBackendAPI(endpoint, token, queryParams) {
     var ret = $.Deferred();
+
+    // Validate token
+    if (!token || token.trim() === '') {
+      console.error('callBackendAPI: Token is missing or empty!');
+      ret.reject('Missing access token');
+      return ret.promise();
+    }
+
     // Use window.BACKEND_API_URL if set, otherwise fall back to BACKEND_API_URL variable
     var backendUrl = (typeof window !== 'undefined' && window.BACKEND_API_URL)
       ? window.BACKEND_API_URL
@@ -238,7 +246,8 @@
     var url = backendUrl + endpoint;
 
     console.log('Making API call to:', url);
-    console.log('Backend URL source:', (typeof window !== 'undefined' && window.BACKEND_API_URL) ? 'window.BACKEND_API_URL' : 'BACKEND_API_URL variable');
+    console.log('Token present:', token ? 'Yes (length: ' + token.length + ')' : 'No');
+    console.log('Token preview:', token ? token.substring(0, 20) + '...' : 'N/A');
 
     var headers = {
       'Authorization': 'Bearer ' + token,
@@ -246,22 +255,31 @@
       'Content-Type': 'application/json'
     };
 
+    console.log('Request headers:', headers);
+
     $.ajax({
       url: url,
       method: 'GET',
       headers: headers,
       data: queryParams,
+      beforeSend: function (xhr) {
+        // Explicitly set Authorization header in beforeSend to ensure it's sent
+        xhr.setRequestHeader('Authorization', 'Bearer ' + token);
+        console.log('Setting Authorization header in beforeSend');
+      },
       // Explicitly disable credentials to avoid CORS issues
       // We use Authorization header, not cookies
       xhrFields: {
         withCredentials: false
       },
-      // Ensure no cookies are sent
       crossDomain: true
     }).done(function (data) {
+      console.log('API call succeeded');
       ret.resolve(data);
     }).fail(function (xhr, status, error) {
       console.error('Backend API call failed:', status, error);
+      console.error('Response status:', xhr.status);
+      console.error('Response text:', xhr.responseText);
       ret.reject(xhr, status, error);
     });
 
@@ -334,21 +352,42 @@
         var ptPromise = callBackendAPI('/api/fhir/Patient/' + patientId, accessToken);
 
         // Get observations from backend
-        // Note: FHIR code parameter format may vary by server
-        // Using multiple code parameters or comma-separated values
+        // Note: FHIR code parameter - try comma-separated first, backend will pass through
         var obvPromise = callBackendAPI('/api/fhir/Observation', accessToken, {
           patient: patientId,
           code: 'http://loinc.org|8302-2,http://loinc.org|8462-4,http://loinc.org|8480-6,http://loinc.org|2085-9,http://loinc.org|2089-1,http://loinc.org|55284-4',
           _count: 100
         });
 
-        $.when(ptPromise, obvPromise).fail(onError);
+        console.log('Making API calls for patient:', patientId);
+
+        $.when(ptPromise, obvPromise).fail(function (patientErr, obvErr) {
+          console.error('API call failed - Patient error:', patientErr);
+          console.error('API call failed - Observations error:', obvErr);
+          onError();
+        });
 
         $.when(ptPromise, obvPromise).done(function (patientResponse, obvResponse) {
-          // Extract patient data
+          console.log('Patient response:', patientResponse);
+          console.log('Observations response:', obvResponse);
+
+          // Extract patient data - backend returns the Patient resource directly
           var patient = patientResponse;
-          var observations = obvResponse.entry || [];
-          var obv = observations.map(function (entry) { return entry.resource; });
+
+          // Extract observations - backend returns Bundle with entry array
+          var observations = [];
+          if (obvResponse && obvResponse.entry) {
+            observations = obvResponse.entry.map(function (entry) {
+              return entry.resource || entry;
+            });
+          } else if (Array.isArray(obvResponse)) {
+            observations = obvResponse;
+          }
+
+          console.log('Extracted patient:', patient);
+          console.log('Extracted observations count:', observations.length);
+
+          var obv = observations;
 
           // Use smart.byCodes if available, otherwise create a simple lookup
           var byCodes = smart.byCodes || function (observations, codeField) {
@@ -386,23 +425,34 @@
           var ldl = byCodesFunc('2089-1');
 
           var p = defaultPatient();
-          p.birthdate = patient.birthDate;
-          p.gender = gender;
-          p.fname = fname;
-          p.lname = lname;
+          // Set values directly (not as objects with value property)
+          p.birthdate = patient.birthDate || '';
+          p.gender = gender || '';
+          p.fname = fname || '';
+          p.lname = lname || '';
 
-          p.height = getQuantityValueAndUnit(height[0]);
+          var heightValue = getQuantityValueAndUnit(height && height[0] ? height[0] : undefined);
+          p.height = heightValue || '';
 
-          if (typeof systolicbp != 'undefined') {
+          if (typeof systolicbp != 'undefined' && systolicbp) {
             p.systolicbp = systolicbp;
+          } else {
+            p.systolicbp = '';
           }
 
-          if (typeof diastolicbp != 'undefined') {
+          if (typeof diastolicbp != 'undefined' && diastolicbp) {
             p.diastolicbp = diastolicbp;
+          } else {
+            p.diastolicbp = '';
           }
 
-          p.hdl = getQuantityValueAndUnit(hdl[0]);
-          p.ldl = getQuantityValueAndUnit(ldl[0]);
+          var hdlValue = getQuantityValueAndUnit(hdl && hdl[0] ? hdl[0] : undefined);
+          p.hdl = hdlValue || '';
+
+          var ldlValue = getQuantityValueAndUnit(ldl && ldl[0] ? ldl[0] : undefined);
+          p.ldl = ldlValue || '';
+
+          console.log('Final patient data object:', p);
 
           ret.resolve(p);
         });
@@ -501,15 +551,15 @@
 
   function defaultPatient() {
     return {
-      fname: { value: '' },
-      lname: { value: '' },
-      gender: { value: '' },
-      birthdate: { value: '' },
-      height: { value: '' },
-      systolicbp: { value: '' },
-      diastolicbp: { value: '' },
-      ldl: { value: '' },
-      hdl: { value: '' },
+      fname: '',
+      lname: '',
+      gender: '',
+      birthdate: '',
+      height: '',
+      systolicbp: '',
+      diastolicbp: '',
+      ldl: '',
+      hdl: '',
     };
   }
 
