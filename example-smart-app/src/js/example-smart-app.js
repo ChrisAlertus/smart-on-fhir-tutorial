@@ -7,6 +7,24 @@
   var BACKEND_API_URL = 'https://wattless-rotundly-celena.ngrok-free.dev';
   console.log('Backend API URL:', BACKEND_API_URL);
 
+  // Patch jwt.decode to handle null tokens gracefully
+  // This prevents errors in fhir-client library when token is invalid
+  if (typeof window !== 'undefined' && window.jwt && window.jwt.decode) {
+    var originalDecode = window.jwt.decode;
+    window.jwt.decode = function (token, options) {
+      if (!token || typeof token !== 'string' || token.trim() === '') {
+        console.warn('jwt.decode called with invalid token');
+        return null;
+      }
+      try {
+        return originalDecode.call(this, token, options);
+      } catch (e) {
+        console.warn('jwt.decode error:', e);
+        return null;
+      }
+    };
+  }
+
   // Cookie management functions
   function setCookie(name, value, days) {
     var expires = "";
@@ -233,10 +251,13 @@
       method: 'GET',
       headers: headers,
       data: queryParams,
-      // Note: withCredentials requires exact CORS origin, not "*"
+      // Explicitly disable credentials to avoid CORS issues
+      // We use Authorization header, not cookies
       xhrFields: {
-        withCredentials: false  // Set to false since we're using Authorization header
-      }
+        withCredentials: false
+      },
+      // Ensure no cookies are sent
+      crossDomain: true
     }).done(function (data) {
       ret.resolve(data);
     }).fail(function (xhr, status, error) {
@@ -389,126 +410,149 @@
         console.error('Token refresh failed:', error);
         onError();
       });
-    } else {
-      onError();
     }
-  }
 
-  // Check if we have a stored token
-  var storedToken = getTokenCookie();
-  if (storedToken && !isTokenExpired()) {
-    // Use stored token, but we still need the smart object for patient context
-    // So we'll still call FHIR.oauth2.ready but it should use the stored token
-    FHIR.oauth2.ready(onReady, onError);
-  } else {
-    console.error('No OAuth callback detected and no token in storage. Redirect to launch page.');
-    onError();
-  }
-} catch (error) {
-  console.error('Error calling FHIR.oauth2.ready:', error);
-  // If it's the specific JWT decode error, try to continue anyway
-  if (error.message && error.message.includes('exp')) {
-    console.warn('JWT decode error detected, but attempting to continue...');
-    // Try to get token from sessionStorage directly
+    // Check if we have OAuth callback parameters or token in sessionStorage
+    var urlParams = new URLSearchParams(window.location.search);
+    var hasCode = urlParams.has('code');
+    var hasError = urlParams.has('error');
+
+    // Check sessionStorage for token
+    var hasTokenInStorage = false;
+    var storedTokenResponse = null;
     try {
       if (sessionStorage.tokenResponse) {
-        var storedToken = JSON.parse(sessionStorage.tokenResponse);
-        if (storedToken && storedToken.access_token) {
-          // Create a minimal smart object
-          var minimalSmart = {
-            tokenResponse: storedToken,
-            patient: { id: getPatientIdCookie() }
-          };
-          onReady(minimalSmart);
-          return ret.promise();
+        storedTokenResponse = JSON.parse(sessionStorage.tokenResponse);
+        // Validate that the token is a valid JWT format (has 3 parts separated by dots)
+        if (storedTokenResponse && storedTokenResponse.access_token) {
+          var tokenParts = storedTokenResponse.access_token.split('.');
+          if (tokenParts.length === 3) {
+            hasTokenInStorage = true;
+          } else {
+            console.warn('Token in sessionStorage is not a valid JWT format');
+          }
         }
       }
     } catch (e) {
-      console.error('Failed to recover from error:', e);
+      console.warn('Error reading token from sessionStorage:', e);
     }
-  }
-  onError();
-}
 
-return ret.promise();
+    // Only call FHIR.oauth2.ready if we have OAuth callback or valid token
+    if (hasCode || hasError || hasTokenInStorage) {
+      // Wrap in try-catch to handle JWT decode errors from fhir-client library
+      try {
+        FHIR.oauth2.ready(onReady, onError);
+      } catch (error) {
+        console.error('Error in FHIR.oauth2.ready:', error);
+        // If it's a JWT decode error, try to recover using stored token
+        if (error.message && (error.message.includes('exp') || error.message.includes('payloadCheck'))) {
+          console.warn('JWT decode error detected, attempting recovery...');
+          if (storedTokenResponse && storedTokenResponse.access_token) {
+            // Create a minimal smart object from stored token
+            var patientId = getPatientIdCookie();
+            if (!patientId && storedTokenResponse.patient) {
+              patientId = storedTokenResponse.patient;
+            }
 
-  };
-
-// Expose token management functions
-window.revokeToken = function () {
-  // Get smart object from sessionStorage if available
-  var tokenResponse = getCookie('fhir_token_response');
-  var smart = null;
-  if (tokenResponse) {
-    try {
-      var tokenData = JSON.parse(tokenResponse);
-      if (tokenData.state) {
-        var state = JSON.parse(sessionStorage[tokenData.state] || '{}');
-        if (state) {
-          smart = { tokenResponse: tokenData };
+            if (patientId) {
+              var minimalSmart = {
+                tokenResponse: storedTokenResponse,
+                patient: { id: patientId }
+              };
+              // Manually call onReady with the recovered smart object
+              setTimeout(function () {
+                onReady(minimalSmart);
+              }, 100);
+              return ret.promise();
+            }
+          }
         }
+        onError();
       }
-    } catch (e) {
-      console.error('Error parsing token response:', e);
+    } else {
+      console.error('No OAuth callback detected and no valid token in storage.');
+      onError();
     }
-  }
-  return revokeToken(smart);
-};
 
-function defaultPatient() {
-  return {
-    fname: { value: '' },
-    lname: { value: '' },
-    gender: { value: '' },
-    birthdate: { value: '' },
-    height: { value: '' },
-    systolicbp: { value: '' },
-    diastolicbp: { value: '' },
-    ldl: { value: '' },
-    hdl: { value: '' },
+    return ret.promise();
+
   };
-}
 
-function getBloodPressureValue(BPObservations, typeOfPressure) {
-  var formattedBPObservations = [];
-  BPObservations.forEach(function (observation) {
-    var BP = observation.component.find(function (component) {
-      return component.code.coding.find(function (coding) {
-        return coding.code == typeOfPressure;
+  // Expose token management functions
+  window.revokeToken = function () {
+    // Get smart object from sessionStorage if available
+    var tokenResponse = getCookie('fhir_token_response');
+    var smart = null;
+    if (tokenResponse) {
+      try {
+        var tokenData = JSON.parse(tokenResponse);
+        if (tokenData.state) {
+          var state = JSON.parse(sessionStorage[tokenData.state] || '{}');
+          if (state) {
+            smart = { tokenResponse: tokenData };
+          }
+        }
+      } catch (e) {
+        console.error('Error parsing token response:', e);
+      }
+    }
+    return revokeToken(smart);
+  };
+
+  function defaultPatient() {
+    return {
+      fname: { value: '' },
+      lname: { value: '' },
+      gender: { value: '' },
+      birthdate: { value: '' },
+      height: { value: '' },
+      systolicbp: { value: '' },
+      diastolicbp: { value: '' },
+      ldl: { value: '' },
+      hdl: { value: '' },
+    };
+  }
+
+  function getBloodPressureValue(BPObservations, typeOfPressure) {
+    var formattedBPObservations = [];
+    BPObservations.forEach(function (observation) {
+      var BP = observation.component.find(function (component) {
+        return component.code.coding.find(function (coding) {
+          return coding.code == typeOfPressure;
+        });
       });
+      if (BP) {
+        observation.valueQuantity = BP.valueQuantity;
+        formattedBPObservations.push(observation);
+      }
     });
-    if (BP) {
-      observation.valueQuantity = BP.valueQuantity;
-      formattedBPObservations.push(observation);
-    }
-  });
 
-  return getQuantityValueAndUnit(formattedBPObservations[0]);
-}
-
-function getQuantityValueAndUnit(ob) {
-  if (typeof ob != 'undefined' &&
-    typeof ob.valueQuantity != 'undefined' &&
-    typeof ob.valueQuantity.value != 'undefined' &&
-    typeof ob.valueQuantity.unit != 'undefined') {
-    return ob.valueQuantity.value + ' ' + ob.valueQuantity.unit;
-  } else {
-    return undefined;
+    return getQuantityValueAndUnit(formattedBPObservations[0]);
   }
-}
 
-window.drawVisualization = function (p) {
-  $('#holder').show();
-  $('#loading').hide();
-  $('#fname').html(p.fname);
-  $('#lname').html(p.lname);
-  $('#gender').html(p.gender);
-  $('#birthdate').html(p.birthdate);
-  $('#height').html(p.height);
-  $('#systolicbp').html(p.systolicbp);
-  $('#diastolicbp').html(p.diastolicbp);
-  $('#ldl').html(p.ldl);
-  $('#hdl').html(p.hdl);
-};
+  function getQuantityValueAndUnit(ob) {
+    if (typeof ob != 'undefined' &&
+      typeof ob.valueQuantity != 'undefined' &&
+      typeof ob.valueQuantity.value != 'undefined' &&
+      typeof ob.valueQuantity.unit != 'undefined') {
+      return ob.valueQuantity.value + ' ' + ob.valueQuantity.unit;
+    } else {
+      return undefined;
+    }
+  }
 
-}) (window);
+  window.drawVisualization = function (p) {
+    $('#holder').show();
+    $('#loading').hide();
+    $('#fname').html(p.fname);
+    $('#lname').html(p.lname);
+    $('#gender').html(p.gender);
+    $('#birthdate').html(p.birthdate);
+    $('#height').html(p.height);
+    $('#systolicbp').html(p.systolicbp);
+    $('#diastolicbp').html(p.diastolicbp);
+    $('#ldl').html(p.ldl);
+    $('#hdl').html(p.hdl);
+  };
+
+})(window);

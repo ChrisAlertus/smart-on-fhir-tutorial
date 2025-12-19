@@ -43,15 +43,12 @@ if not cleaned_origins:
     cleaned_origins = ["https://chrisalertus.github.io"]
 
 print(f"CORS allowed origins: {cleaned_origins}")
-# Note: supports_credentials=False because we use Authorization headers, not cookies
-CORS(
-    app,
-    origins=cleaned_origins,
-    supports_credentials=
-    False,  # Set to False since we use Authorization headers
-    methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type"],
-    expose_headers=["Content-Type"])
+# Flask-CORS uses request Origin if it matches our list, never "*"
+CORS(app,
+     origins=cleaned_origins,
+     supports_credentials=True,
+     methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+     allow_headers=["Authorization", "Content-Type"])
 
 # Import blueprints
 try:
