@@ -1,6 +1,11 @@
-(function(window){
+(function (window) {
   // Configuration - Backend API URL (should be HTTPS)
-  var BACKEND_API_URL = window.BACKEND_API_URL || 'https://localhost:8443';
+  // Check window.BACKEND_API_URL first (set in index.html), then fall back to default
+  //var BACKEND_API_URL = (typeof window !== 'undefined' && window.BACKEND_API_URL)
+  //  ? window.BACKEND_API_URL
+  //  : 'https://localhost:8443';
+  var BACKEND_API_URL = 'https://wattless-rotundly-celena.ngrok-free.dev';
+  console.log('Backend API URL:', BACKEND_API_URL);
 
   // Cookie management functions
   function setCookie(name, value, days) {
@@ -104,10 +109,10 @@
 
       // Call the refresh function from fhir-client
       if (typeof FHIR !== 'undefined' && FHIR.oauth2 && FHIR.oauth2.refresh) {
-        FHIR.oauth2.refresh(smart).done(function(newTokenResponse) {
+        FHIR.oauth2.refresh(smart).done(function (newTokenResponse) {
           setTokenCookie(newTokenResponse);
           ret.resolve(newTokenResponse);
-        }).fail(function(error) {
+        }).fail(function (error) {
           console.error('Token refresh failed:', error);
           clearTokenCookie();
           ret.reject(error);
@@ -123,10 +128,10 @@
               grant_type: 'refresh_token',
               refresh_token: refreshToken
             }
-          }).done(function(newTokenResponse) {
+          }).done(function (newTokenResponse) {
             setTokenCookie(newTokenResponse);
             ret.resolve(newTokenResponse);
-          }).fail(function(error) {
+          }).fail(function (error) {
             console.error('Token refresh failed:', error);
             clearTokenCookie();
             ret.reject(error);
@@ -187,10 +192,10 @@
           token: accessToken,
           token_type_hint: 'access_token'
         }
-      }).done(function() {
+      }).done(function () {
         clearTokenCookie();
         ret.resolve('Token revoked successfully');
-      }).fail(function(error) {
+      }).fail(function (error) {
         console.error('Token revocation failed:', error);
         // Clear cookies anyway
         clearTokenCookie();
@@ -205,10 +210,12 @@
     return ret.promise();
   }
 
-  // Make API call to FastAPI backend
+  // Make API call to Flask backend
   function callBackendAPI(endpoint, token, queryParams) {
     var ret = $.Deferred();
-    var url = BACKEND_API_URL + endpoint;
+    // Use window.BACKEND_API_URL if set, otherwise fall back to BACKEND_API_URL variable
+    var backendUrl = window.BACKEND_API_URL || BACKEND_API_URL;
+    var url = backendUrl + endpoint;
 
     var headers = {
       'Authorization': 'Bearer ' + token,
@@ -224,9 +231,9 @@
       xhrFields: {
         withCredentials: true
       }
-    }).done(function(data) {
+    }).done(function (data) {
       ret.resolve(data);
-    }).fail(function(xhr, status, error) {
+    }).fail(function (xhr, status, error) {
       console.error('Backend API call failed:', status, error);
       ret.reject(xhr, status, error);
     });
@@ -234,7 +241,7 @@
     return ret.promise();
   }
 
-  window.extractData = function() {
+  window.extractData = function () {
     var ret = $.Deferred();
 
     function onError() {
@@ -242,7 +249,7 @@
       ret.reject();
     }
 
-    function onReady(smart)  {
+    function onReady(smart) {
       if (smart.hasOwnProperty('patient') && smart.tokenResponse) {
         // Store token in cookie
         setTokenCookie(smart.tokenResponse);
@@ -262,7 +269,7 @@
           tokenPromise = refreshToken(smart);
         }
 
-        tokenPromise.done(function(tokenResponse) {
+        tokenPromise.done(function (tokenResponse) {
           var accessToken = tokenResponse.access_token || getTokenCookie();
 
           if (!accessToken) {
@@ -284,21 +291,21 @@
 
           $.when(ptPromise, obvPromise).fail(onError);
 
-          $.when(ptPromise, obvPromise).done(function(patientResponse, obvResponse) {
+          $.when(ptPromise, obvPromise).done(function (patientResponse, obvResponse) {
             // Extract patient data
             var patient = patientResponse;
             var observations = obvResponse.entry || [];
-            var obv = observations.map(function(entry) { return entry.resource; });
+            var obv = observations.map(function (entry) { return entry.resource; });
 
             // Use smart.byCodes if available, otherwise create a simple lookup
-            var byCodes = smart.byCodes || function(observations, codeField) {
-              return function(code) {
-                return observations.filter(function(obs) {
+            var byCodes = smart.byCodes || function (observations, codeField) {
+              return function (code) {
+                return observations.filter(function (obs) {
                   if (!obs.code || !obs.code.coding) return false;
-                  return obs.code.coding.some(function(coding) {
+                  return obs.code.coding.some(function (coding) {
                     return coding.code === code ||
-                           (coding.system && coding.code &&
-                            (coding.system + '|' + coding.code).endsWith('|' + code));
+                      (coding.system && coding.code &&
+                        (coding.system + '|' + coding.code).endsWith('|' + code));
                   });
                 });
               };
@@ -320,8 +327,8 @@
             }
 
             var height = byCodesFunc('8302-2');
-            var systolicbp = getBloodPressureValue(byCodesFunc('55284-4'),'8480-6');
-            var diastolicbp = getBloodPressureValue(byCodesFunc('55284-4'),'8462-4');
+            var systolicbp = getBloodPressureValue(byCodesFunc('55284-4'), '8480-6');
+            var diastolicbp = getBloodPressureValue(byCodesFunc('55284-4'), '8462-4');
             var hdl = byCodesFunc('2085-9');
             var ldl = byCodesFunc('2089-1');
 
@@ -333,7 +340,7 @@
 
             p.height = getQuantityValueAndUnit(height[0]);
 
-            if (typeof systolicbp != 'undefined')  {
+            if (typeof systolicbp != 'undefined') {
               p.systolicbp = systolicbp;
             }
 
@@ -346,7 +353,7 @@
 
             ret.resolve(p);
           });
-        }).fail(function(error) {
+        }).fail(function (error) {
           console.error('Token refresh failed:', error);
           onError();
         });
@@ -371,7 +378,7 @@
   };
 
   // Expose token management functions
-  window.revokeToken = function() {
+  window.revokeToken = function () {
     // Get smart object from sessionStorage if available
     var tokenResponse = getCookie('fhir_token_response');
     var smart = null;
@@ -391,25 +398,25 @@
     return revokeToken(smart);
   };
 
-  function defaultPatient(){
+  function defaultPatient() {
     return {
-      fname: {value: ''},
-      lname: {value: ''},
-      gender: {value: ''},
-      birthdate: {value: ''},
-      height: {value: ''},
-      systolicbp: {value: ''},
-      diastolicbp: {value: ''},
-      ldl: {value: ''},
-      hdl: {value: ''},
+      fname: { value: '' },
+      lname: { value: '' },
+      gender: { value: '' },
+      birthdate: { value: '' },
+      height: { value: '' },
+      systolicbp: { value: '' },
+      diastolicbp: { value: '' },
+      ldl: { value: '' },
+      hdl: { value: '' },
     };
   }
 
   function getBloodPressureValue(BPObservations, typeOfPressure) {
     var formattedBPObservations = [];
-    BPObservations.forEach(function(observation){
-      var BP = observation.component.find(function(component){
-        return component.code.coding.find(function(coding) {
+    BPObservations.forEach(function (observation) {
+      var BP = observation.component.find(function (component) {
+        return component.code.coding.find(function (coding) {
           return coding.code == typeOfPressure;
         });
       });
@@ -424,16 +431,16 @@
 
   function getQuantityValueAndUnit(ob) {
     if (typeof ob != 'undefined' &&
-        typeof ob.valueQuantity != 'undefined' &&
-        typeof ob.valueQuantity.value != 'undefined' &&
-        typeof ob.valueQuantity.unit != 'undefined') {
-          return ob.valueQuantity.value + ' ' + ob.valueQuantity.unit;
+      typeof ob.valueQuantity != 'undefined' &&
+      typeof ob.valueQuantity.value != 'undefined' &&
+      typeof ob.valueQuantity.unit != 'undefined') {
+      return ob.valueQuantity.value + ' ' + ob.valueQuantity.unit;
     } else {
       return undefined;
     }
   }
 
-  window.drawVisualization = function(p) {
+  window.drawVisualization = function (p) {
     $('#holder').show();
     $('#loading').hide();
     $('#fname').html(p.fname);
