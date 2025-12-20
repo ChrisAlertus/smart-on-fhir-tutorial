@@ -106,8 +106,10 @@
 
       // Token is now stored in sessionStorage.tokenResponse by fhir-client.js
       // We can use it directly from there for backend calls
-      const fhirServerUrl = smart.state.serverUrl;
+      const fhirServerUrl = smart.serverUrl;
       console.log("FHIR Server URL:", fhirServerUrl);
+      console.log("Smart:", smart);
+      console.log("Smart.state:", smart.state);
       // Store it for later use if needed
       window.fhirServerUrl = fhirServerUrl;
 
