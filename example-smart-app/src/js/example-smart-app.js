@@ -61,9 +61,6 @@
     }
 
     // Make request with token from sessionStorage
-    console.log('Making request to:', url);
-    console.log('Token:', token.trim());
-    console.log('Query params:', queryParams);
     console.log('FHIR Server URL:', fhirServerUrl || 'using backend default');
     $.ajax({
       url: url,
@@ -109,7 +106,7 @@
 
       // Token is now stored in sessionStorage.tokenResponse by fhir-client.js
       // We can use it directly from there for backend calls
-      const fhirServerUrl = smart.serverUrl;
+      const fhirServerUrl = smart.state.serverUrl;
       console.log("FHIR Server URL:", fhirServerUrl);
       // Store it for later use if needed
       window.fhirServerUrl = fhirServerUrl;
