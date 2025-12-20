@@ -252,7 +252,8 @@
     var headers = {
       'Authorization': 'Bearer ' + token,
       'Accept': 'application/json',
-      'Content-Type': 'application/json'
+      'Content-Type': 'application/json',
+      'ngrok-skip-browser-warning': 'true'
     };
 
     console.log('Request headers:', headers);
