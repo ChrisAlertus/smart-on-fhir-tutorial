@@ -8,10 +8,6 @@ import os
 import logging
 from fhirclient import client
 from fhirclient.models import patient, observation
-try:
-    from backend.auth import validate_token, TokenValidationError
-except ImportError:
-    from auth import validate_token, TokenValidationError
 
 logger = logging.getLogger(__name__)
 
@@ -166,7 +162,7 @@ def get_fhir_resource(resource_type: str,
             elif resource_type == "Observation":
                 # Convert dict to keyword arguments
                 results = observation.Observation.where(
-                    **search_params).perform_resources(server)
+                    struct=search_params).perform_resources(server)
                 # Convert to Bundle format
                 bundle = {
                     "resourceType": "Bundle",
@@ -226,16 +222,6 @@ def get_patient(patient_id: str):
     # Extract and validate token
     token = extract_token_from_header(authorization)
 
-    # Validate token
-    try:
-        logger.warning(
-            f"Validating token for Patient endpoint (length: {len(token)})")
-        validate_token(token)
-    except TokenValidationError as e:
-        logger.error(f"Token validation failed: {e.message}")
-        from werkzeug.exceptions import Unauthorized
-        raise Unauthorized(e.message)
-
     # Get patient resource
     logger.warning(f"Getting patient resource: {patient_id}")
     return jsonify(get_fhir_resource("Patient", patient_id, token))
@@ -258,16 +244,6 @@ def get_observations():
 
     # Extract and validate token
     token = extract_token_from_header(authorization)
-
-    # Validate token
-    try:
-        logger.warning(
-            f"Validating token for Observation endpoint (length: {len(token)})"
-        )
-        validate_token(token)
-    except TokenValidationError as e:
-        from werkzeug.exceptions import Unauthorized
-        raise Unauthorized(e.message)
 
     # Build query parameters from request
     query_params = {}
@@ -310,13 +286,6 @@ def search_patients():
 
     # Extract and validate token
     token = extract_token_from_header(authorization)
-
-    # Validate token
-    try:
-        validate_token(token)
-    except TokenValidationError as e:
-        from werkzeug.exceptions import Unauthorized
-        raise Unauthorized(e.message)
 
     # Build query parameters
     query_params = {}
