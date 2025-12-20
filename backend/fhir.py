@@ -60,20 +60,25 @@ def extract_token_from_header(authorization: str) -> str:
     return token
 
 
-def get_fhir_server(access_token: str = None):
+def get_fhir_server(access_token: str = None, fhir_server_url: str = None):
     """
     Create a FHIR server instance configured with the base URL and access token
 
     Args:
         access_token: OAuth access token
+        fhir_server_url: Optional FHIR server URL (overrides FHIR_BASE_URL from env)
 
     Returns:
         client.FHIRServer: Configured FHIR server
     """
-    if not FHIR_BASE_URL:
-        raise InternalServerError("FHIR_BASE_URL not configured")
+    # Use provided URL, or fall back to environment variable, or raise error
+    api_base = fhir_server_url or FHIR_BASE_URL
+    if not api_base:
+        raise InternalServerError(
+            "FHIR server URL not configured (neither provided nor in FHIR_BASE_URL env var)"
+        )
 
-    settings = {'app_id': 'smart-on-fhir-tutorial', 'api_base': FHIR_BASE_URL}
+    settings = {'app_id': 'smart-on-fhir-tutorial', 'api_base': api_base}
 
     # Create client and get server instance
     fhir_client = client.FHIRClient(settings=settings)
@@ -86,13 +91,15 @@ def get_fhir_server(access_token: str = None):
         server.session.headers.update(
             {'Authorization': f'Bearer {access_token}'})
 
+    logger.info(f"Using FHIR server: {api_base}")
     return server
 
 
 def get_fhir_resource(resource_type: str,
                       resource_id: str = None,
                       access_token: str = None,
-                      query_params: dict = None) -> dict:
+                      query_params: dict = None,
+                      fhir_server_url: str = None) -> dict:
     """
     Make a request to the FHIR server using fhirclient
 
@@ -101,16 +108,14 @@ def get_fhir_resource(resource_type: str,
         resource_id: Optional resource ID
         access_token: OAuth access token
         query_params: Optional query parameters
+        fhir_server_url: Optional FHIR server URL (overrides FHIR_BASE_URL from env)
 
     Returns:
         dict: FHIR resource response
     """
-    if not FHIR_BASE_URL:
-        raise InternalServerError("FHIR_BASE_URL not configured")
-
     try:
-        # Get configured FHIR server
-        server = get_fhir_server(access_token)
+        # Get configured FHIR server (use provided URL or fall back to env var)
+        server = get_fhir_server(access_token, fhir_server_url)
 
         # Build resource reference
         if resource_id:
@@ -222,9 +227,13 @@ def get_patient(patient_id: str):
     # Extract and validate token
     token = extract_token_from_header(authorization)
 
+    # Get FHIR server URL from header if provided, otherwise use default
+    fhir_server_url = request.headers.get("X-FHIR-Server-URL")
+
     # Get patient resource
     logger.warning(f"Getting patient resource: {patient_id}")
-    return jsonify(get_fhir_resource("Patient", patient_id, token))
+    return jsonify(
+        get_fhir_resource("Patient", patient_id, token, None, fhir_server_url))
 
 
 @bp.route("/Observation", methods=["GET"])
@@ -244,6 +253,9 @@ def get_observations():
 
     # Extract and validate token
     token = extract_token_from_header(authorization)
+
+    # Get FHIR server URL from header if provided, otherwise use default
+    fhir_server_url = request.headers.get("X-FHIR-Server-URL")
 
     # Build query parameters from request
     query_params = {}
@@ -266,7 +278,9 @@ def get_observations():
             query_params[key] = value
 
     # Get observations
-    return jsonify(get_fhir_resource("Observation", None, token, query_params))
+    return jsonify(
+        get_fhir_resource("Observation", None, token, query_params,
+                          fhir_server_url))
 
 
 @bp.route("/Patient", methods=["GET"])
@@ -287,6 +301,9 @@ def search_patients():
     # Extract and validate token
     token = extract_token_from_header(authorization)
 
+    # Get FHIR server URL from header if provided, otherwise use default
+    fhir_server_url = request.headers.get("X-FHIR-Server-URL")
+
     # Build query parameters
     query_params = {}
     identifier = request.args.get("identifier")
@@ -306,4 +323,6 @@ def search_patients():
             query_params[key] = value
 
     # Search patients
-    return jsonify(get_fhir_resource("Patient", None, token, query_params))
+    return jsonify(
+        get_fhir_resource("Patient", None, token, query_params,
+                          fhir_server_url))

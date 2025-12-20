@@ -56,7 +56,7 @@ CORS(app,
      methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
      allow_headers=[
          "Authorization", "Content-Type", "ngrok-skip-browser-warning",
-         "Accept"
+         "Accept", "X-FHIR-Server-URL"
      ])
 
 # Import blueprints
