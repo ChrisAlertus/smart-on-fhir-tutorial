@@ -249,14 +249,32 @@
     console.log('Token present:', token ? 'Yes (length: ' + token.length + ')' : 'No');
     console.log('Token preview:', token ? token.substring(0, 20) + '...' : 'N/A');
 
+    // Ensure token doesn't already have "Bearer " prefix
+    var cleanToken = token;
+    if (token.startsWith('Bearer ')) {
+      cleanToken = token.substring(7);
+      console.warn('Token already had Bearer prefix, removing it');
+    }
+
+    // Validate token format before sending
+    var tokenParts = cleanToken.split('.');
+    if (tokenParts.length !== 3) {
+      console.error('Invalid token format: expected 3 parts, got', tokenParts.length);
+      console.error('Token preview:', cleanToken.substring(0, 50) + '...');
+      ret.reject('Invalid token format');
+      return ret.promise();
+    }
+
     var headers = {
-      'Authorization': 'Bearer ' + token,
+      'Authorization': 'Bearer ' + cleanToken,
       'Accept': 'application/json',
       'Content-Type': 'application/json',
       'ngrok-skip-browser-warning': 'true'
     };
 
     console.log('Request headers:', headers);
+    console.log('Token parts count:', tokenParts.length);
+    console.log('Token length:', cleanToken.length);
 
     $.ajax({
       url: url,
@@ -265,8 +283,9 @@
       data: queryParams,
       beforeSend: function (xhr) {
         // Explicitly set Authorization header in beforeSend to ensure it's sent
-        xhr.setRequestHeader('Authorization', 'Bearer ' + token);
-        console.log('Setting Authorization header in beforeSend');
+        // Use cleanToken to avoid double Bearer prefix
+        xhr.setRequestHeader('Authorization', 'Bearer ' + cleanToken);
+        console.log('Setting Authorization header in beforeSend with token length:', cleanToken.length);
       },
       // Explicitly disable credentials to avoid CORS issues
       // We use Authorization header, not cookies
