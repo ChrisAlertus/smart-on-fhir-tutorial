@@ -5,7 +5,13 @@ Handles token validation and FHIR API proxying
 from flask import Flask, jsonify
 from flask_cors import CORS
 import os
+import logging
 from dotenv import load_dotenv
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
 # Load environment variables
 load_dotenv()
@@ -48,7 +54,10 @@ CORS(app,
      origins=cleaned_origins,
      supports_credentials=True,
      methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-     allow_headers=["Authorization", "Content-Type"])
+     allow_headers=[
+         "Authorization", "Content-Type", "ngrok-skip-browser-warning",
+         "Accept"
+     ])
 
 # Import blueprints
 try:
