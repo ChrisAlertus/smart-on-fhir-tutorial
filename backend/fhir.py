@@ -72,6 +72,8 @@ def get_fhir_server(access_token: str = None, fhir_server_url: str = None):
         client.FHIRServer: Configured FHIR server
     """
     # Use provided URL, or fall back to environment variable, or raise error
+    logger.warning(f"FHIR server URL: {fhir_server_url}")
+    logger.warning(f"FHIR_BASE_URL: {FHIR_BASE_URL}")
     api_base = fhir_server_url or FHIR_BASE_URL
     if not api_base:
         raise InternalServerError(

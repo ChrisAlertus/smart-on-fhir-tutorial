@@ -23,29 +23,16 @@
     return null;
   }
 
-  /**
-   * Get token response from sessionStorage (managed by fhir-client.js)
-   * @returns {object|null} Token response object or null if not available
-   */
-  function getTokenResponseFromSessionStorage() {
-    try {
-      if (sessionStorage.tokenResponse) {
-        return JSON.parse(sessionStorage.tokenResponse);
-      }
-    } catch (e) {
-      console.warn('Error reading token response from sessionStorage:', e);
-    }
-    return null;
-  }
 
   /**
    * Make API call to Flask backend
    * Token is extracted from sessionStorage (managed by fhir-client.js)
    * @param {string} endpoint - API endpoint (e.g., '/api/fhir/Patient/123')
    * @param {object} queryParams - Optional query parameters
+   * @param {string} fhirServerUrl - Optional FHIR server URL (overrides backend default)
    * @returns {Promise} jQuery deferred promise
    */
-  function callBackendAPI(endpoint, queryParams) {
+  function callBackendAPI(endpoint, queryParams, fhirServerUrl) {
     var ret = $.Deferred();
 
     // Get token from sessionStorage (managed by fhir-client.js)
@@ -61,15 +48,27 @@
       : BACKEND_API_URL;
     var url = backendUrl + endpoint;
 
+    // Prepare headers
+    var headers = {
+      'Authorization': 'Bearer ' + token.trim(),
+      'Accept': 'application/json',
+      'ngrok-skip-browser-warning': 'true'
+    };
+
+    // Add FHIR server URL to headers if provided
+    if (fhirServerUrl) {
+      headers['X-FHIR-Server-URL'] = fhirServerUrl;
+    }
+
     // Make request with token from sessionStorage
+    console.log('Making request to:', url);
+    console.log('Token:', token.trim());
+    console.log('Query params:', queryParams);
+    console.log('FHIR Server URL:', fhirServerUrl || 'using backend default');
     $.ajax({
       url: url,
       method: 'GET',
-      headers: {
-        'Authorization': 'Bearer ' + token.trim(),
-        'Accept': 'application/json',
-        'ngrok-skip-browser-warning': 'true'
-      },
+      headers: headers,
       data: queryParams,
       xhrFields: {
         withCredentials: false
@@ -110,6 +109,11 @@
 
       // Token is now stored in sessionStorage.tokenResponse by fhir-client.js
       // We can use it directly from there for backend calls
+      const fhirServerUrl = client.state.serverUrl;
+      console.log("FHIR Server URL:", fhirServerUrl);
+      // Store it for later use if needed
+      window.fhirServerUrl = fhirServerUrl;
+
 
       // Get patient ID
       var patientId = smart.patient.id;
@@ -120,14 +124,16 @@
       }
 
       // Get patient data from backend (token extracted from sessionStorage)
-      var ptPromise = callBackendAPI('/api/fhir/Patient/' + patientId);
+      // Pass fhirServerUrl to backend so it uses the correct FHIR server
+      var ptPromise = callBackendAPI('/api/fhir/Patient/' + patientId, null, fhirServerUrl);
 
       // Get observations from backend (token extracted from sessionStorage)
+      // Pass fhirServerUrl to backend so it uses the correct FHIR server
       var obvPromise = callBackendAPI('/api/fhir/Observation', {
         patient: patientId,
         code: 'http://loinc.org|8302-2,http://loinc.org|8462-4,http://loinc.org|8480-6,http://loinc.org|2085-9,http://loinc.org|2089-1,http://loinc.org|55284-4',
         _count: 100
-      });
+      }, fhirServerUrl);
 
       $.when(ptPromise, obvPromise).fail(function (patientErr, obvErr) {
         console.error('API call failed - Patient error:', patientErr);
