@@ -91,35 +91,15 @@
     window.BACKEND_API_URL = 'https://wattless-rotundly-celena.ngrok-free.dev' //window.BACKEND_API_URL || 'https://localhost:8443';
     console.log('Backend URL configured:', window.BACKEND_API_URL);
 
-    // Global error handler to catch JWT decode errors from fhir-client
-    window.addEventListener('error', function (event) {
-      if (event.message && (event.message.includes('payloadCheck') || event.message.includes('can\'t access property "exp"'))) {
-        console.warn('Caught JWT decode error from fhir-client, attempting recovery...');
-        event.preventDefault(); // Prevent error from showing in console
-
-        // Try to recover by getting token from sessionStorage
-        try {
-          if (sessionStorage.tokenResponse) {
-            var tokenResponse = JSON.parse(sessionStorage.tokenResponse);
-            if (tokenResponse && tokenResponse.access_token) {
-              // Token exists, try to continue with extractData
-              console.log('Token found in sessionStorage, continuing...');
-              // The extractData function should handle this
-            }
-          }
-        } catch (e) {
-          console.error('Recovery failed:', e);
-        }
-      }
-    }, true); // Use capture phase
-
+    // Extract data using fhir-client.js for OAuth2/token management
+    // Token is stored in sessionStorage.tokenResponse by fhir-client.js
+    // and automatically passed to backend API calls
     extractData().then(
-      //Display Patient Demographics and Observations if extractData was success
+      // Display Patient Demographics and Observations if extractData was successful
       function (p) {
         drawVisualization(p);
       },
-
-      //Display 'Failed to call FHIR Service' if extractData failed
+      // Display error if extractData failed
       function () {
         $('#loading').hide();
         $('#errors').html('<p> Failed to call FHIR Service </p>');
