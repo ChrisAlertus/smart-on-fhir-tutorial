@@ -232,74 +232,42 @@
   function callBackendAPI(endpoint, token, queryParams) {
     var ret = $.Deferred();
 
-    // Validate token
-    if (!token || token.trim() === '') {
-      console.error('callBackendAPI: Token is missing or empty!');
+    // Basic token validation
+    if (!token || !token.trim()) {
       ret.reject('Missing access token');
       return ret.promise();
     }
 
-    // Use window.BACKEND_API_URL if set, otherwise fall back to BACKEND_API_URL variable
+    // Clean token: remove Bearer prefix if present, then trim
+    var cleanToken = token.trim();
+    if (cleanToken.startsWith('Bearer ')) {
+      cleanToken = cleanToken.substring(7).trim();
+    }
+
+    // Build URL
     var backendUrl = (typeof window !== 'undefined' && window.BACKEND_API_URL)
       ? window.BACKEND_API_URL
       : BACKEND_API_URL;
     var url = backendUrl + endpoint;
 
-    console.log('Making API call to:', url);
-    console.log('Token present:', token ? 'Yes (length: ' + token.length + ')' : 'No');
-    console.log('Token preview:', token ? token.substring(0, 20) + '...' : 'N/A');
-
-    // Ensure token doesn't already have "Bearer " prefix
-    var cleanToken = token;
-    if (token.startsWith('Bearer ')) {
-      cleanToken = token.substring(7);
-      console.warn('Token already had Bearer prefix, removing it');
-    }
-
-    // Validate token format before sending
-    var tokenParts = cleanToken.split('.');
-    if (tokenParts.length !== 3) {
-      console.error('Invalid token format: expected 3 parts, got', tokenParts.length);
-      console.error('Token preview:', cleanToken.substring(0, 50) + '...');
-      ret.reject('Invalid token format');
-      return ret.promise();
-    }
-
-    var headers = {
-      'Authorization': 'Bearer ' + cleanToken,
-      'Accept': 'application/json',
-      'Content-Type': 'application/json',
-      'ngrok-skip-browser-warning': 'true'
-    };
-
-    console.log('Request headers:', headers);
-    console.log('Token parts count:', tokenParts.length);
-    console.log('Token length:', cleanToken.length);
-
+    // Make request
     $.ajax({
       url: url,
       method: 'GET',
-      headers: headers,
-      data: queryParams,
-      beforeSend: function (xhr) {
-        // Explicitly set Authorization header in beforeSend to ensure it's sent
-        // Use cleanToken to avoid double Bearer prefix
-        xhr.setRequestHeader('Authorization', 'Bearer ' + cleanToken);
-        console.log('Setting Authorization header in beforeSend with token length:', cleanToken.length);
+      headers: {
+        'Authorization': 'Bearer ' + cleanToken,
+        'Accept': 'application/json',
+        'ngrok-skip-browser-warning': 'true'
       },
-      // Explicitly disable credentials to avoid CORS issues
-      // We use Authorization header, not cookies
+      data: queryParams,
       xhrFields: {
         withCredentials: false
       },
       crossDomain: true
     }).done(function (data) {
-      console.log('API call succeeded');
       ret.resolve(data);
     }).fail(function (xhr, status, error) {
-      console.error('Backend API call failed:', status, error);
-      console.error('Response status:', xhr.status);
-      console.error('Response text:', xhr.responseText);
+      console.error('Backend API call failed:', status, error, xhr.responseText);
       ret.reject(xhr, status, error);
     });
 
