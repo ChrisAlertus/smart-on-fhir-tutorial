@@ -108,8 +108,9 @@
       // We can use it directly from there for backend calls
       const fhirServerUrl = smart.state.server || smart.server.serviceUrl;
       console.log("FHIR Server URL:", fhirServerUrl);
-      console.log("Smart:", smart);
-      console.log("Smart.state:", smart.state);
+      // console.log("Smart:", smart);
+      // console.log("Smart.state:", smart.state);
+
       // Store it for later use if needed
       window.fhirServerUrl = fhirServerUrl;
 
@@ -154,8 +155,8 @@
           observations = obvResponse;
         }
 
-        console.log('Extracted patient:', patient);
-        console.log('Extracted observations count:', observations.length);
+        // console.log('Extracted patient:', patient);
+        // console.log('Extracted observations count:', observations.length);
 
         var obv = observations;
 
